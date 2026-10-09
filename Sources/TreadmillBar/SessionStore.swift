@@ -40,6 +40,12 @@ final class SessionStore {
 
     var today: [Session] { sessions.filter { Calendar.current.isDateInToday($0.start) } }
 
+    var days: [(day: Date, sessions: [Session])] {
+        Dictionary(grouping: sessions) { Calendar.current.startOfDay(for: $0.start) }
+            .map { (day: $0.key, sessions: $0.value.sorted { $0.start > $1.start }) }
+            .sorted { $0.day > $1.day }
+    }
+
     func update(with s: Sample, at now: Date = Date(), weight: Double = 0, height: Double = 0) {
         self.weight = weight
         self.height = height

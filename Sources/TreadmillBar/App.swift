@@ -7,7 +7,7 @@ enum Main {
         let args = CommandLine.arguments
         if Treadmill.debug { setvbuf(stdout, nil, _IOLBF, 0) }
         if let i = args.firstIndex(of: "--snapshot"), i + 1 < args.count {
-            let page: Page = args.contains("--settings") ? .settings : .main
+            let page: Page = args.contains("--settings") ? .settings : args.contains("--history") ? .history : .main
             MainActor.assumeIsolated { Snapshot.render(to: args[i + 1], page: page) }
             return
         }
@@ -34,6 +34,18 @@ enum Snapshot {
         _ = NSApplication.shared
         let storeURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("snapshot-sessions.json")
         try? FileManager.default.removeItem(at: storeURL)
+        let past = SessionStore(url: storeURL)
+        for (daysAgo, hour, minutes, kmh) in [(9, 8, 18, 2.4), (3, 10, 60, 3.2), (1, 9, 42, 3.0), (1, 15, 25, 2.6)] {
+            let start = Calendar.current.date(byAdding: .day, value: -daysAgo,
+                                              to: Calendar.current.date(bySettingHour: hour, minute: 0, second: 0, of: Date())!)!
+            let seconds = minutes * 60
+            let end = start.addingTimeInterval(Double(seconds))
+            let meters = Int(kmh / 3.6 * Double(seconds))
+            past.update(with: Sample(status: 3, speed: kmh, time: seconds, distance: meters,
+                                     kcal: Double(meters) * 0.07, steps: meters * 13 / 10),
+                        at: end, weight: 72, height: 175)
+            past.finishCurrent()
+        }
         let store = SessionStore(url: storeURL)
         let profile = Profile(defaults: UserDefaults(suiteName: "TreadmillBarSnapshot")!)
         profile.weight = 72

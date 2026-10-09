@@ -15,7 +15,7 @@ struct MenuBarLabel: View {
     }
 }
 
-enum Page { case main, settings }
+enum Page { case main, settings, history }
 
 struct PanelView: View {
     let treadmill: Treadmill
@@ -35,6 +35,10 @@ struct PanelView: View {
                 }
             case .settings:
                 SettingsPage(treadmill: treadmill) {
+                    withAnimation(.snappy) { page = .main }
+                }
+            case .history:
+                HistoryPage(treadmill: treadmill) {
                     withAnimation(.snappy) { page = .main }
                 }
             }
@@ -228,27 +232,38 @@ private struct MainPage: View {
 
     private var today: some View {
         let total = Totals(treadmill.sessions.today, profile: profile)
-        return VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .firstTextBaseline) {
-                Label("Today", systemImage: "calendar")
-                    .font(.subheadline.weight(.medium))
-                Spacer()
-                Text("\(Format.steps(total.steps)) steps")
-                    .font(.subheadline.weight(.semibold))
+        return Button { open(.history) } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline) {
+                    Label("Today", systemImage: "calendar")
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Text("\(Format.steps(total.steps)) steps")
+                        .font(.subheadline.weight(.semibold))
+                        .monospacedDigit()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                Text(total.summary)
+                    .font(.caption)
                     .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            Text(total.summary)
-                .font(.caption)
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .trailing)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .help("Show history")
     }
 
     private var footer: some View {
         HStack(spacing: 12) {
             Button { open(.settings) } label: {
                 Label("Settings", systemImage: "gearshape")
+            }
+            Button { open(.history) } label: {
+                Label("History", systemImage: "clock.arrow.circlepath")
             }
             Spacer()
             Button {
@@ -327,6 +342,125 @@ private struct Totals {
 
     var summary: String {
         "\(Format.duration(seconds)) · \(String(format: "%.1f km · %.0f kcal", Double(meters) / 1000, kcal))"
+    }
+}
+
+private struct HistoryPage: View {
+    let treadmill: Treadmill
+    let close: () -> Void
+    @State private var expanded: Set<Date> = [Calendar.current.startOfDay(for: Date())]
+
+    private var profile: Profile { treadmill.profile }
+
+    var body: some View {
+        let days = treadmill.sessions.days
+        VStack(alignment: .leading, spacing: 14) {
+            PageHeader(title: "History", back: close)
+
+            if days.isEmpty {
+                Text("No workouts yet.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 24)
+            } else {
+                let all = Totals(treadmill.sessions.sessions, profile: profile)
+                HStack(alignment: .firstTextBaseline) {
+                    Text("\(days.count) days · \(treadmill.sessions.sessions.count) sessions")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(Format.steps(all.steps)) steps").fontWeight(.semibold).monospacedDigit()
+                }
+                .font(.caption)
+
+                ViewThatFits(in: .vertical) {
+                    list(days)
+                    ScrollView { list(days) }
+                }
+                .frame(maxHeight: 440)
+            }
+        }
+    }
+
+    private func list(_ days: [(day: Date, sessions: [Session])]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(days, id: \.day) { day in
+                dayCard(day.day, day.sessions)
+            }
+        }
+    }
+
+    private func dayCard(_ day: Date, _ sessions: [Session]) -> some View {
+        let total = Totals(sessions, profile: profile)
+        let isOpen = expanded.contains(day)
+        return VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation(.snappy) {
+                    if isOpen { expanded.remove(day) } else { expanded.insert(day) }
+                }
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(isOpen ? 90 : 0))
+                        Text(dayTitle(day)).font(.subheadline.weight(.medium))
+                        Spacer()
+                        Text("\(Format.steps(total.steps)) steps")
+                            .font(.subheadline.weight(.semibold))
+                            .monospacedDigit()
+                    }
+                    HStack {
+                        Text(sessions.count == 1 ? "1 session" : "\(sessions.count) sessions")
+                        Spacer()
+                        Text(total.summary).monospacedDigit()
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isOpen {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(sessions) { sessionRow($0) }
+                }
+                .padding(.leading, 14)
+            }
+        }
+        .padding(10)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func sessionRow(_ s: Session) -> some View {
+        let live = treadmill.sessions.current?.id == s.id
+        return VStack(alignment: .leading, spacing: 1) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("\(s.start.formatted(date: .omitted, time: .shortened))–\(s.end.formatted(date: .omitted, time: .shortened))")
+                    .monospacedDigit()
+                if live {
+                    Circle().fill(.green).frame(width: 6, height: 6)
+                }
+                Spacer()
+                Text("\(Format.steps(profile.steps(for: s))) steps").monospacedDigit()
+            }
+            .font(.callout)
+            Text("\(Format.time(s.duration)) · \(String(format: "%.2f km · %.0f kcal · %.1f km/h", Double(s.distance) / 1000, s.activeKcal ?? s.kcal, s.averageSpeed))")
+                .font(.caption2)
+                .monospacedDigit()
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    private func dayTitle(_ day: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(day) { return "Today" }
+        if cal.isDateInYesterday(day) { return "Yesterday" }
+        let sameYear = cal.isDate(day, equalTo: Date(), toGranularity: .year)
+        return day.formatted(sameYear ? .dateTime.weekday(.abbreviated).day().month(.abbreviated)
+                                      : .dateTime.day().month(.abbreviated).year())
     }
 }
 
